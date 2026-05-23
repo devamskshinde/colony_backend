@@ -42,10 +42,12 @@ header "Syncing Latest Code"
 if [ -d "${COLONY_DIR}/.git" ]; then
   info "Pulling latest changes from GitHub..."
   cd "$COLONY_DIR"
-  git pull --rebase origin master 2>&1 | tee -a "$LOG_FILE" || {
-    warn "Git pull failed — continuing with local code"
+  git stash 2>/dev/null || true
+  git fetch origin 2>&1 | tee -a "$LOG_FILE"
+  git reset --hard origin/master 2>&1 | tee -a "$LOG_FILE" || {
+    warn "Git sync failed — continuing with local code"
   }
-  log "Code synced"
+  log "Code synced to latest"
 else
   info "Not a git repo — using local files as-is"
 fi
