@@ -1,0 +1,38 @@
+{
+  "name": "colony-backend",
+  "version": "1.0.0",
+  "description": "Colony — Hyper-local social media backend (10M concurrent users)",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "migrate": "node src/scripts/migrate.js",
+    "seed": "node src/scripts/seed.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "cors": "^2.8.5",
+    "helmet": "^8.0.0",
+    "compression": "^1.7.5",
+    "morgan": "^1.10.0",
+    "pg": "^8.13.1",
+    "ioredis": "^5.4.2",
+    "amqplib": "^0.10.5",
+    "jsonwebtoken": "^9.0.2",
+    "bcryptjs": "^2.4.3",
+    "uuid": "^11.1.0",
+    "ngeohash": "^2.0.0",
+    "winston": "^3.17.0",
+    "dotenv": "^16.4.7",
+    "joi": "^17.13.3",
+    "socket.io": "^4.8.1",
+    "@socket.io/redis-adapter": "^8.3.0",
+    "node-cron": "^3.0.3",
+    "hpp": "^0.2.3",
+    "express-rate-limit": "^7.5.0",
+    "rate-limit-redis": "^4.2.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
