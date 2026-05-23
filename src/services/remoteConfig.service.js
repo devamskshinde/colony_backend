@@ -17,7 +17,7 @@ const MAINTENANCE_KEY = 'config:maintenance';
  * Table expected: remote_config
  *   columns: id, key (unique), value, value_type ('static'|'tier'|'json'|'boolean'|'number'),
  *            tier_values (jsonb, e.g. {"free":"A","premium":"B"}),
- *            description, version, updated_by, updated_at, created_at
+ *            description, version, last_modified_by, last_modified_at, created_at
  *
  * Expects:
  *   - db (pg.Pool)         via init(opts)
@@ -257,10 +257,10 @@ async function updateConfig(key, value, adminId) {
     // Update DB
     const result = await db.query(
       `UPDATE remote_config
-       SET value = $1, version = $2, updated_by = $3, updated_at = NOW()
+       SET value = $1::jsonb, version = $2, last_modified_by = $3, last_modified_at = NOW()
        WHERE key = $4
        RETURNING key, value, value_type, tier_values, version`,
-      [String(value), newVersion, adminId, key]
+      [typeof value === 'string' ? value : JSON.stringify(value), newVersion, adminId, key]
     );
 
     if (result.rows.length === 0) {
@@ -280,7 +280,8 @@ async function updateConfig(key, value, adminId) {
 
     // Update version
     await cache.set(CONFIG_VERSION_KEY, String(newVersion));
-    await db.query('UPDATE remote_config SET version = $1 WHERE key = \'__version_counter\'', [newVersion]);
+    // Version is tracked per-row (each row has its own version column)
+    // The overall config version = MAX(version) across all rows
 
     // Special handling for maintenance mode
     if (key === 'maintenance_mode') {
