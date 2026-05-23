@@ -4,10 +4,11 @@ WORKDIR /app
 
 # Install dependencies
 COPY package.json package-lock.json* ./
-RUN npm ci --production 2>/dev/null || npm install --production
+RUN npm ci --omit=dev 2>/dev/null || npm install --omit=dev
 
-# Copy source
-COPY . .
+# Copy source (but NOT .env — that's mounted or provided at runtime)
+COPY src/ ./src/
+COPY migrations/ ./migrations/
 
 # Expose port
 EXPOSE 5000
