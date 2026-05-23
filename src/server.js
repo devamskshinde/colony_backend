@@ -34,22 +34,43 @@ async function boot() {
     pid: process.pid,
   });
 
-  // ── 1. Verify database connection ───────────────────────────────────
-  try {
-    await query('SELECT 1');
-    logger.info('PostgreSQL connection verified');
-  } catch (err) {
-    logger.error('Failed to connect to PostgreSQL', { error: err.message });
+  // ── 1. Verify database connection (with retry) ─────────────────────
+  let dbReady = false;
+  for (let attempt = 1; attempt <= 10; attempt++) {
+    try {
+      await query('SELECT 1');
+      logger.info('PostgreSQL connection verified');
+      dbReady = true;
+      break;
+    } catch (err) {
+      logger.warn(`PostgreSQL attempt ${attempt}/10 failed: ${err.message}`);
+      if (attempt < 10) await new Promise(r => setTimeout(r, 3000));
+    }
+  }
+  if (!dbReady) {
+    logger.error('Failed to connect to PostgreSQL after 10 attempts');
+    logger.error('Check: DB_PASSWORD in .env matches the Docker container password');
+    logger.error('Fix: ./setup.sh (will auto-detect and fix password mismatch)');
     process.exit(1);
   }
 
-  // ── 2. Verify Redis connection ──────────────────────────────────────
-  try {
-    const redisClient = redis.getClient();
-    await redisClient.ping();
-    logger.info('Redis connection verified');
-  } catch (err) {
-    logger.error('Failed to connect to Redis', { error: err.message });
+  // ── 2. Verify Redis connection (with retry) ─────────────────────────
+  let redisReady = false;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      const redisClient = redis.getClient();
+      await redisClient.ping();
+      logger.info('Redis connection verified');
+      redisReady = true;
+      break;
+    } catch (err) {
+      logger.warn(`Redis attempt ${attempt}/5 failed: ${err.message}`);
+      if (attempt < 5) await new Promise(r => setTimeout(r, 2000));
+    }
+  }
+  if (!redisReady) {
+    logger.error('Failed to connect to Redis after 5 attempts');
+    logger.error('Check: REDIS_PASSWORD in .env matches the Docker container password');
     process.exit(1);
   }
 
