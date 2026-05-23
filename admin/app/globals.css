@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --radius: 0.625rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-bgPrimary text-textPrimary;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@layer utilities {
+  .mesh-gradient {
+    background-image:
+      radial-gradient(at 20% 20%, rgba(124, 58, 237, 0.08) 0px, transparent 50%),
+      radial-gradient(at 80% 80%, rgba(236, 72, 153, 0.06) 0px, transparent 50%),
+      radial-gradient(at 50% 50%, rgba(59, 130, 246, 0.04) 0px, transparent 50%);
+  }
+
+  .purple-gradient {
+    background: linear-gradient(135deg, #7C3AED, #EC4899);
+  }
+
+  .purple-gradient-hover {
+    background: linear-gradient(135deg, #6D28D9, #DB2777);
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(107, 107, 128, 0.3) transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: rgba(107, 107, 128, 0.3);
+    border-radius: 3px;
+  }
+}
