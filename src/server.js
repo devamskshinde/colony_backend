@@ -14,6 +14,11 @@ const { pool, query } = require('./config/database');
 const redis = require('./config/redis');
 const cacheService = require('./services/cache.service');
 const remoteConfigService = require('./services/remoteConfig.service');
+const otpService = require('./services/otp.service');
+const authService = require('./services/auth.service');
+const locationService = require('./services/location.service');
+const configService = require('./services/config.service');
+const userService = require('./services/user.service');
 const { initWebSocket } = require('./websocket/wsServer');
 const { startLocationSyncWorker, stopLocationSyncWorker } = require('./workers/locationSync.worker');
 const { startCleanupWorker, stopCleanupWorker } = require('./workers/cleanup.worker');
@@ -78,8 +83,13 @@ async function boot() {
   try {
     cacheService.init(redis.getClient());
     remoteConfigService.init({ db: pool, cache: cacheService });
+    otpService.init(pool);
+    authService.init(pool);
+    locationService.init(pool);
+    configService.init(pool);
+    userService.init(pool);
     await remoteConfigService.loadAllConfig();
-    logger.info('Remote config loaded into Redis');
+    logger.info('All services initialized, remote config loaded');
   } catch (err) {
     logger.warn('Failed to load remote config, continuing with defaults', {
       error: err.message,
