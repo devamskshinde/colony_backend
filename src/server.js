@@ -8,6 +8,12 @@ const redis = require('./config/redis');
 const { initWebSocket } = require('./websocket/wsServer');
 const { startWorkers, stopWorkers } = require('./workers');
 const remoteConfigService = require('./services/remoteConfig.service');
+const otpService = require('./services/otp.service');
+const authService = require('./services/auth.service');
+const locationService = require('./services/location.service');
+const configService = require('./services/config.service');
+const userService = require('./services/user.service');
+const cacheService = require('./services/cache.service');
 const logger = require('./utils/logger');
 const env = require('./config/environment');
 
@@ -25,27 +31,41 @@ async function start() {
     await redisClient.ping();
     logger.info('Redis connected');
 
-    // 3. Load remote config
+    // 3. Initialize ALL services with their dependencies
+    cacheService.init(redisClient);
+    remoteConfigService.init({ db: pool, cache: cacheService });
+    otpService.init(pool);
+    authService.init({ db: pool, cache: cacheService });
+    locationService.init({ db: pool, cache: cacheService, queue: null });
+    configService.init(pool);
+    userService.init(pool);
+    logger.info('All services initialized');
+
+    // 4. Load remote config into Redis
     await remoteConfigService.loadAllConfig();
     logger.info('Remote config loaded');
 
-    // 4. HTTP server
+    // 5. HTTP server
     server = http.createServer(app);
 
-    // 5. WebSocket
-    initWebSocket(server);
-    logger.info('WebSocket initialized');
+    // 6. WebSocket
+    try {
+      initWebSocket(server);
+      logger.info('WebSocket initialized');
+    } catch (err) {
+      logger.warn('WebSocket init failed (non-fatal)', { error: err.message });
+    }
 
-    // 6. Workers
+    // 7. Workers
     startWorkers();
     logger.info('Workers started');
 
-    // 7. Listen
+    // 8. Listen
     server.listen(env.PORT, env.HOST, () => {
       logger.info(`Server running on ${env.HOST}:${env.PORT}`);
     });
 
-    // 8. Graceful shutdown
+    // 9. Graceful shutdown
     const shutdown = async (signal) => {
       logger.info(`${signal} received, shutting down`);
       server.close(async () => {
