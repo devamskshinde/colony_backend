@@ -158,30 +158,35 @@ header "Starting Docker Services (Fresh)"
 
 docker compose up -d 2>&1 | tee -a "$LOG_FILE"
 
-# Wait for PostgreSQL — use docker exec (psql may not be on host)
-info "Waiting for PostgreSQL..."
-for i in $(seq 1 30); do
-  if docker exec colony-postgres pg_isready -U colony_user -d colony &>/dev/null; then
-    # Extra wait for DB to finish initialization
-    sleep 3
-    log "PostgreSQL ready on port 5432"
+# Wait for PostgreSQL to be fully ready (user created, DB initialized)
+# pg_isready returns "accepting connections" before init scripts finish,
+# so we must test actual password authentication with psql
+info "Waiting for PostgreSQL (testing password auth)..."
+DB_READY=false
+for i in $(seq 1 60); do
+  if docker exec colony-postgres psql -U colony_user -d colony -c "SELECT 1" &>/dev/null; then
+    log "PostgreSQL ready and password verified on port 5432"
+    DB_READY=true
     break
   fi
-  if [ "$i" -eq 30 ]; then
-    error "PostgreSQL failed after 30 attempts"
-    error "Debug: docker logs colony-postgres"
-    exit 1
+  # Show progress every 10 attempts
+  if [ $((i % 10)) -eq 0 ]; then
+    info "Still waiting for PostgreSQL... (attempt $i/60)"
+    # Show postgres logs to help debug
+    docker logs colony-postgres 2>&1 | tail -3 | tee -a "$LOG_FILE"
   fi
-  sleep 2
+  sleep 3
 done
 
-# Verify password works by running psql INSIDE the container
-info "Verifying database password..."
-if docker exec colony-postgres psql -U colony_user -d colony -c "SELECT 1" &>/dev/null; then
-  log "Database password verified"
-else
-  error "Database password mismatch — this should not happen with v4.0"
-  error "Try: docker compose down -v && ./setup.sh"
+if [ "$DB_READY" = false ]; then
+  error "PostgreSQL failed after 60 attempts (3 minutes)"
+  error "PostgreSQL logs:"
+  docker logs colony-postgres 2>&1 | tail -20 | tee -a "$LOG_FILE"
+  error ""
+  error "Common causes:"
+  error "  - Migrations SQL error (check logs above)"
+  error "  - Docker out of memory"
+  error "  - Port 5432 already in use"
   exit 1
 fi
 
