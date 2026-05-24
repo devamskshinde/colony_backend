@@ -84,8 +84,8 @@ async function boot() {
     cacheService.init(redis.getClient());
     remoteConfigService.init({ db: pool, cache: cacheService });
     otpService.init(pool);
-    authService.init(pool);
-    locationService.init(pool);
+    authService.init({ db: pool, cache: cacheService });
+    locationService.init({ db: pool, cache: cacheService, queue: null });
     configService.init(pool);
     userService.init(pool);
     await remoteConfigService.loadAllConfig();

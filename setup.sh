@@ -158,12 +158,13 @@ header "Starting Docker Services (Fresh)"
 
 docker compose up -d 2>&1 | tee -a "$LOG_FILE"
 
-# Wait for PostgreSQL with REAL TCP authentication test
+# Wait for PostgreSQL — use docker exec (psql may not be on host)
 info "Waiting for PostgreSQL..."
 for i in $(seq 1 30); do
-  # Test REAL TCP password auth (not docker exec which bypasses it)
-  if PGPASSWORD="${DB_PASSWORD}" psql -h localhost -p 5432 -U colony_user -d colony -c "SELECT 1" &>/dev/null; then
-    log "PostgreSQL ready AND password verified on TCP port 5432"
+  if docker exec colony-postgres pg_isready -U colony_user -d colony &>/dev/null; then
+    # Extra wait for DB to finish initialization
+    sleep 3
+    log "PostgreSQL ready on port 5432"
     break
   fi
   if [ "$i" -eq 30 ]; then
@@ -174,10 +175,20 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
-# Wait for Redis
+# Verify password works by running psql INSIDE the container
+info "Verifying database password..."
+if docker exec colony-postgres psql -U colony_user -d colony -c "SELECT 1" &>/dev/null; then
+  log "Database password verified"
+else
+  error "Database password mismatch — this should not happen with v4.0"
+  error "Try: docker compose down -v && ./setup.sh"
+  exit 1
+fi
+
+# Wait for Redis — use docker exec
 info "Waiting for Redis..."
 for i in $(seq 1 15); do
-  if redis-cli -h 127.0.0.1 -p 6379 -a "${REDIS_PASSWORD}" ping 2>/dev/null | grep -q PONG; then
+  if docker exec colony-redis redis-cli -a "${REDIS_PASSWORD}" ping 2>/dev/null | grep -q PONG; then
     log "Redis ready on port 6379"
     break
   fi
@@ -208,16 +219,6 @@ log "Dependencies installed"
 # Seed admin user via TCP connection
 # ═══════════════════════════════════════════════════════════════
 header "Seeding Admin User"
-
-PGPASSWORD="${DB_PASSWORD}" psql -h localhost -p 5432 -U colony_user -d colony -c "
-DO \$\$
-BEGIN
-  IF NOT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'admin_users') THEN
-    RAISE NOTICE 'admin_users table does not exist yet — migrations may not have run';
-  END IF;
-END
-\$\$;
-" 2>&1 | tee -a "$LOG_FILE"
 
 node -e "
 const bcrypt = require('bcryptjs');
