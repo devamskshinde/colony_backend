@@ -17,7 +17,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body className={`${inter.variable} font-sans bg-bgPrimary text-textPrimary antialiased`}>
+      <body className={`${inter.variable} font-sans bg-bgPrimary text-textPrimary antialiased`} suppressHydrationWarning>
         {children}
         <Toaster
           position="top-right"

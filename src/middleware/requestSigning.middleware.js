@@ -18,6 +18,7 @@ const EXEMPT_PATHS = [
   '/api/config/version',
   '/api/auth/',
   '/api/v1/auth/',
+  '/api/v1/admin/',
 ];
 
 /**
