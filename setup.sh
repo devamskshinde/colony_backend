@@ -1,6 +1,6 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════
-# Colony Backend — One-Click Setup Script v3.0
+# Colony Backend — One-Click Setup Script v4.0
 # ═══════════════════════════════════════════════════════════════
 
 set -euo pipefail
@@ -23,10 +23,6 @@ error() { echo -e "${RED}[✗]${NC} $1" | tee -a "$LOG_FILE"; }
 info()  { echo -e "${BLUE}[i]${NC} $1" | tee -a "$LOG_FILE"; }
 header(){ echo -e "\n${PURPLE}═══ $1 ═══${NC}\n" | tee -a "$LOG_FILE"; }
 
-generate_secret() {
-  node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-}
-
 # ═══════════════════════════════════════════════════════════════
 # Banner
 # ═══════════════════════════════════════════════════════════════
@@ -38,118 +34,75 @@ cat << 'BANNER'
   ██║     ██║   ██║██║     ██║   ██║██║╚██╗██║  ╚██╔╝
   ╚██████╗╚██████╔╝███████╗╚██████╔╝██║ ╚████║   ██║
    ╚═════╝ ╚═════╝ ╚══════╝ ╚═════╝ ╚═╝  ╚═══╝   ╚═╝
-   Backend Setup Script v3.0
+   Backend Setup Script v4.0
 BANNER
 echo -e "${NC}"
 
 # ═══════════════════════════════════════════════════════════════
-# Self-update from GitHub
+# Self-update
 # ═══════════════════════════════════════════════════════════════
 header "Syncing Latest Code"
-
 if [ -d "${COLONY_DIR}/.git" ]; then
-  info "Pulling latest changes from GitHub..."
   cd "$COLONY_DIR"
   git stash 2>/dev/null || true
   git fetch origin 2>&1 | tee -a "$LOG_FILE"
-  git reset --hard origin/master 2>&1 | tee -a "$LOG_FILE" || {
-    warn "Git sync failed — continuing with local code"
-  }
+  git reset --hard origin/master 2>&1 | tee -a "$LOG_FILE" || warn "Git sync failed"
   log "Code synced to latest"
 fi
 
 # ═══════════════════════════════════════════════════════════════
-# Pre-flight checks
+# Pre-flight
 # ═══════════════════════════════════════════════════════════════
 header "Pre-flight Checks"
 
 check_command() {
-  if command -v "$1" &> /dev/null; then
-    log "$1 found: $(command -v "$1")"
-    return 0
-  else
-    return 1
-  fi
+  command -v "$1" &> /dev/null && { log "$1 found"; return 0; } || return 1
 }
 
 if ! check_command docker; then
-  warn "Docker not found. Installing..."
-  curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
-  sh /tmp/get-docker.sh 2>&1 | tee -a "$LOG_FILE"
+  warn "Installing Docker..."
+  curl -fsSL https://get.docker.com | sh 2>&1 | tee -a "$LOG_FILE"
   sudo usermod -aG docker "$USER" 2>/dev/null || true
   log "Docker installed"
 fi
 
-if ! docker compose version &> /dev/null; then
-  warn "Docker Compose v2 not found. Installing..."
+if ! docker compose version &>/dev/null; then
+  warn "Installing Docker Compose..."
   sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
   sudo chmod +x /usr/local/bin/docker-compose
-  log "Docker Compose installed"
 fi
 
 if ! check_command node; then
-  warn "Node.js not found. Installing v20 LTS..."
+  warn "Installing Node.js 20..."
   curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
   sudo apt-get install -y nodejs 2>&1 | tee -a "$LOG_FILE"
-  log "Node.js installed: $(node --version)"
 fi
-
-NODE_VERSION=$(node --version | cut -d'v' -f2 | cut -d'.' -f1)
-if [ "$NODE_VERSION" -lt 18 ]; then
-  error "Node.js 18+ required. Found: $(node --version)"
-  exit 1
-fi
-log "Node.js version OK: $(node --version)"
-
+log "Node $(node --version)"
 check_command npm || { error "npm not found"; exit 1; }
 
 # ═══════════════════════════════════════════════════════════════
-# Environment — REUSE existing passwords, only generate if missing
-# This is critical: Docker volumes persist DB passwords across runs
+# Generate passwords — ALWAYS use fixed defaults for dev
+# This eliminates the password mismatch problem permanently.
+# For production, override via environment variables before running.
 # ═══════════════════════════════════════════════════════════════
 header "Environment Configuration"
 
-# Read existing passwords from .env if it exists
-read_env_var() {
-  local key="$1"
-  if [ -f "$ENV_FILE" ]; then
-    grep "^${key}=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- | tr -d '"' | tr -d "'" || echo ""
-  else
-    echo ""
-  fi
-}
-
-EXISTING_DB_PASS=$(read_env_var "DB_PASSWORD")
-EXISTING_REDIS_PASS=$(read_env_var "REDIS_PASSWORD")
-EXISTING_RABBIT_PASS=$(read_env_var "RABBITMQ_PASSWORD")
-EXISTING_JWT=$(read_env_var "JWT_SECRET")
-EXISTING_JWT_ADMIN=$(read_env_var "JWT_ADMIN_SECRET")
-EXISTING_SIGNING=$(read_env_var "REQUEST_SIGNING_SECRET")
-EXISTING_DEVICE=$(read_env_var "DEVICE_SECRET")
-
-# Reuse existing passwords (critical for Docker volume persistence)
-DB_PASSWORD="${EXISTING_DB_PASS:-$(generate_secret | head -c 24)}"
-REDIS_PASSWORD="${EXISTING_REDIS_PASS:-$(generate_secret | head -c 24)}"
-RABBITMQ_PASSWORD="${EXISTING_RABBIT_PASS:-$(generate_secret | head -c 24)}"
-JWT_SECRET="${EXISTING_JWT:-$(generate_secret)}"
-JWT_ADMIN_SECRET="${EXISTING_JWT_ADMIN:-$(generate_secret)}"
-REQUEST_SIGNING_SECRET="${EXISTING_SIGNING:-$(generate_secret)}"
-DEVICE_SECRET="${EXISTING_DEVICE:-$(generate_secret)}"
-
-if [ -n "$EXISTING_DB_PASS" ]; then
-  log "Reusing existing database password from .env"
-else
-  log "Generated new database password"
-fi
+DB_PASSWORD="${DB_PASSWORD:-colony_db_pass_2024}"
+REDIS_PASSWORD="${REDIS_PASSWORD:-colony_redis_pass_2024}"
+RABBITMQ_PASSWORD="${RABBITMQ_PASSWORD:-colony_rabbit_pass_2024}"
+JWT_SECRET="${JWT_SECRET:-colony_jwt_secret_key_change_in_prod_32chars}"
+JWT_ADMIN_SECRET="${JWT_ADMIN_SECRET:-colony_jwt_admin_secret_change_in_prod}"
+REQUEST_SIGNING_SECRET="${REQUEST_SIGNING_SECRET:-colony_signing_secret_change_in_prod}"
+DEVICE_SECRET="${DEVICE_SECRET:-colony_device_secret_change_in_production}"
 
 cat > "$ENV_FILE" << EOF
-# Colony Backend — Generated $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+# Colony Backend — $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+# Override these with environment variables for production
 
 NODE_ENV=production
 PORT=5000
 HOST=0.0.0.0
 
-# PostgreSQL
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=colony
@@ -157,118 +110,78 @@ DB_USER=colony_user
 DB_PASSWORD=${DB_PASSWORD}
 DB_POOL_MAX=100
 
-# Redis
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
 REDIS_PASSWORD=${REDIS_PASSWORD}
 
-# JWT
 JWT_SECRET=${JWT_SECRET}
 JWT_ADMIN_SECRET=${JWT_ADMIN_SECRET}
 JWT_EXPIRY=15m
 REFRESH_TOKEN_EXPIRY=30d
 
-# Request Signing
 REQUEST_SIGNING_SECRET=${REQUEST_SIGNING_SECRET}
 DEVICE_SECRET=${DEVICE_SECRET}
 
-# RabbitMQ
 RABBITMQ_URL=amqp://colony:${RABBITMQ_PASSWORD}@localhost:5672
 
-# OTP
 OTP_MOCK=true
 
-# Admin
 ADMIN_DEFAULT_USERNAME=admin
 ADMIN_DEFAULT_PASSWORD=admin123
 ADMIN_ALLOWED_IPS=
 
-# Logging
 LOG_LEVEL=info
 EOF
 
 chmod 600 "$ENV_FILE"
-log ".env saved"
+log ".env created"
 
 # ═══════════════════════════════════════════════════════════════
-# Stop old containers
+# Stop everything and nuke volumes for clean start
+# This is the nuclear option that guarantees password consistency
 # ═══════════════════════════════════════════════════════════════
-header "Stopping Old Containers"
+header "Clean Slate — Resetting Docker"
 
 cd "$COLONY_DIR"
-docker compose down 2>/dev/null || true
-# Kill orphan containers
-docker rm -f colony-pgbouncer colony-api 2>/dev/null || true
-# Kill any process on port 5000
+docker compose down -v 2>/dev/null || true
+docker rm -f colony-postgres colony-redis colony-rabbitmq colony-pgbouncer colony-api 2>/dev/null || true
 fuser -k 5000/tcp 2>/dev/null || true
-log "Old containers stopped"
+
+# Force remove volumes to guarantee fresh DB with correct password
+docker volume rm colony_backend_postgres_data colony_backend_redis_data colony_backend_rabbitmq_data 2>/dev/null || true
+log "All containers and volumes removed"
 
 # ═══════════════════════════════════════════════════════════════
-# Reset Docker volumes if first run (to ensure fresh DB)
+# Start Docker Services (fresh)
 # ═══════════════════════════════════════════════════════════════
-if [ -n "$EXISTING_DB_PASS" ]; then
-  info "Existing passwords detected — keeping database volumes"
-else
-  info "Fresh install — resetting database volumes"
-  docker volume rm colony_backend_postgres_data 2>/dev/null || true
-  docker volume rm colony_backend_redis_data 2>/dev/null || true
-  docker volume rm colony_backend_rabbitmq_data 2>/dev/null || true
-fi
-
-# ═══════════════════════════════════════════════════════════════
-# Start Docker Services
-# ═══════════════════════════════════════════════════════════════
-header "Starting Docker Services"
+header "Starting Docker Services (Fresh)"
 
 docker compose up -d 2>&1 | tee -a "$LOG_FILE"
-log "Docker services starting..."
 
-# Wait for PostgreSQL
+# Wait for PostgreSQL with REAL TCP authentication test
 info "Waiting for PostgreSQL..."
 for i in $(seq 1 30); do
-  if docker exec colony-postgres pg_isready -U colony_user -d colony &>/dev/null; then
-    log "PostgreSQL ready on port 5432"
+  # Test REAL TCP password auth (not docker exec which bypasses it)
+  if PGPASSWORD="${DB_PASSWORD}" psql -h localhost -p 5432 -U colony_user -d colony -c "SELECT 1" &>/dev/null; then
+    log "PostgreSQL ready AND password verified on TCP port 5432"
     break
   fi
   if [ "$i" -eq 30 ]; then
-    error "PostgreSQL failed to start"
-    error "Run: docker logs colony-postgres"
+    error "PostgreSQL failed after 30 attempts"
+    error "Debug: docker logs colony-postgres"
     exit 1
   fi
   sleep 2
 done
 
-# Test actual password authentication
-info "Verifying database authentication..."
-if docker exec colony-postgres psql -U colony_user -d colony -c "SELECT 1" &>/dev/null; then
-  log "Database authentication OK"
-else
-  warn "Password mismatch — resetting database volume"
-  docker compose down 2>/dev/null || true
-  docker volume rm colony_backend_postgres_data 2>/dev/null || true
-  docker compose up -d postgres 2>&1 | tee -a "$LOG_FILE"
-  info "Waiting for fresh PostgreSQL..."
-  for i in $(seq 1 30); do
-    if docker exec colony-postgres pg_isready -U colony_user -d colony &>/dev/null; then
-      sleep 3
-      break
-    fi
-    sleep 2
-  done
-  log "Database reset with new password"
-fi
-
 # Wait for Redis
 info "Waiting for Redis..."
 for i in $(seq 1 15); do
-  if docker exec colony-redis redis-cli -a "${REDIS_PASSWORD}" ping 2>/dev/null | grep -q PONG; then
+  if redis-cli -h 127.0.0.1 -p 6379 -a "${REDIS_PASSWORD}" ping 2>/dev/null | grep -q PONG; then
     log "Redis ready on port 6379"
     break
   fi
-  if [ "$i" -eq 15 ]; then
-    error "Redis failed to start"
-    exit 1
-  fi
+  [ "$i" -eq 15 ] && { error "Redis failed"; exit 1; }
   sleep 2
 done
 
@@ -279,150 +192,134 @@ for i in $(seq 1 30); do
     log "RabbitMQ ready on port 5672"
     break
   fi
-  if [ "$i" -eq 30 ]; then
-    warn "RabbitMQ slow to start, continuing..."
-    break
-  fi
+  [ "$i" -eq 30 ] && warn "RabbitMQ slow, continuing..."
   sleep 3
 done
 
 # ═══════════════════════════════════════════════════════════════
-# Install Node Dependencies
+# Install dependencies
 # ═══════════════════════════════════════════════════════════════
 header "Installing Dependencies"
-
 cd "$COLONY_DIR"
 npm install --omit=dev 2>&1 | tee -a "$LOG_FILE"
-log "Node.js dependencies installed"
+log "Dependencies installed"
 
 # ═══════════════════════════════════════════════════════════════
-# Seed Admin User
+# Seed admin user via TCP connection
 # ═══════════════════════════════════════════════════════════════
 header "Seeding Admin User"
 
-sleep 2
+PGPASSWORD="${DB_PASSWORD}" psql -h localhost -p 5432 -U colony_user -d colony -c "
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'admin_users') THEN
+    RAISE NOTICE 'admin_users table does not exist yet — migrations may not have run';
+  END IF;
+END
+\$\$;
+" 2>&1 | tee -a "$LOG_FILE"
 
-DB_HOST=localhost DB_PORT=5432 DB_NAME=colony DB_USER=colony_user DB_PASSWORD="${DB_PASSWORD}" \
 node -e "
 const bcrypt = require('bcryptjs');
 const { Pool } = require('pg');
-
-async function seedAdmin() {
+async function seed() {
   const pool = new Pool({
-    host: process.env.DB_HOST || 'localhost',
-    port: parseInt(process.env.DB_PORT || '5432'),
-    database: process.env.DB_NAME || 'colony',
-    user: process.env.DB_USER || 'colony_user',
-    password: process.env.DB_PASSWORD,
-    connectionTimeoutMillis: 10000,
+    host: 'localhost', port: 5432, database: 'colony',
+    user: 'colony_user', password: '${DB_PASSWORD}',
+    connectionTimeoutMillis: 5000,
   });
-
   try {
     await pool.query('SELECT 1');
     const hash = await bcrypt.hash('admin123', 12);
-    await pool.query(\`
-      INSERT INTO admin_users (username, password_hash, email, role, permissions)
-      VALUES (\$1, \$2, \$3, \$4, \$5)
-      ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash
-    \`, ['admin', hash, 'admin@colony.app', 'super_admin', JSON.stringify({'*': true})]);
-    console.log('Admin user seeded: admin / admin123');
-  } catch (err) {
-    console.error('Admin seed error:', err.message);
-  } finally {
-    await pool.end();
-  }
+    await pool.query(
+      'INSERT INTO admin_users (username, password_hash, email, role, permissions) VALUES (\$1, \$2, \$3, \$4, \$5) ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash',
+      ['admin', hash, 'admin@colony.app', 'super_admin', JSON.stringify({'*': true})]
+    );
+    console.log('Admin seeded: admin / admin123');
+  } catch (e) {
+    console.error('Admin seed:', e.message);
+  } finally { await pool.end(); }
 }
-seedAdmin();
+seed();
 " 2>&1 | tee -a "$LOG_FILE"
 
 # ═══════════════════════════════════════════════════════════════
-# Start API Server
+# Start API server
 # ═══════════════════════════════════════════════════════════════
-header "Starting Colony API Server"
+header "Starting Colony API"
 
 cd "$COLONY_DIR"
-
-# Kill any existing
 fuser -k 5000/tcp 2>/dev/null || true
 
-if command -v pm2 &> /dev/null; then
+if command -v pm2 &>/dev/null; then
   pm2 delete colony-api 2>/dev/null || true
-  pm2 start src/server.js --name colony-api -i max --max-memory-restart 512M 2>&1 | tee -a "$LOG_FILE"
-  pm2 save 2>&1 | tee -a "$LOG_FILE"
+  pm2 start src/server.js --name colony-api 2>&1 | tee -a "$LOG_FILE"
   log "API started with PM2"
 else
   nohup node src/server.js > colony-api.log 2>&1 &
-  API_PID=$!
-  echo "$API_PID" > "${COLONY_DIR}/colony-api.pid"
-  log "API started (PID: $API_PID)"
+  echo $! > colony-api.pid
+  log "API started (PID: $!)"
 fi
 
-# Wait for API
-info "Waiting for API to respond..."
+# Wait for API with proper health check
+info "Waiting for API..."
+API_OK=false
 for i in $(seq 1 30); do
-  if curl -sf http://localhost:5000/health > /dev/null 2>&1; then
-    log "API server responding on port 5000"
+  RESPONSE=$(curl -sf http://localhost:5000/health 2>/dev/null || echo "")
+  if echo "$RESPONSE" | grep -q '"status":"ok"'; then
+    log "API responding on port 5000"
+    API_OK=true
     break
-  fi
-  if [ "$i" -eq 30 ]; then
-    error "API not responding. Last 20 lines of log:"
-    tail -20 colony-api.log 2>/dev/null || echo "(no log file)"
   fi
   sleep 2
 done
 
+if [ "$API_OK" = false ]; then
+  error "API failed to start. Last 30 lines:"
+  tail -30 colony-api.log 2>/dev/null || echo "(no log)"
+fi
+
 # ═══════════════════════════════════════════════════════════════
-# Get IPs
+# IPs
 # ═══════════════════════════════════════════════════════════════
-PUBLIC_IP=$(curl -sf --connect-timeout 5 https://api.ipify.org 2>/dev/null || echo "unavailable")
-LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "unavailable")
+PUBLIC_IP=$(curl -sf --connect-timeout 5 https://api.ipify.org 2>/dev/null || echo "")
+LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")
 
 # ═══════════════════════════════════════════════════════════════
 # Summary
 # ═══════════════════════════════════════════════════════════════
-header "Setup Complete!"
+header "Setup Complete"
 
 echo -e "${GREEN}"
-cat << DONE
-  ╔═══════════════════════════════════════════════════════════════════╗
-  ║                    COLONY BACKEND READY!                          ║
-  ╠═══════════════════════════════════════════════════════════════════╣
-  ║                                                                   ║
-  ║  API Server:    http://localhost:5000                             ║
-DONE
-
-if [ "$PUBLIC_IP" != "unavailable" ]; then
-  echo -e "  ║  Public URL:    ${CYAN}http://${PUBLIC_IP}:5000${GREEN}                         ║"
-fi
-if [ "$LOCAL_IP" != "unavailable" ]; then
-  echo -e "  ║  Local Network: ${CYAN}http://${LOCAL_IP}:5000${GREEN}                     ║"
-fi
-
-cat << DONE
-  ║  Health Check:  http://localhost:5000/health                      ║
-  ║                                                                   ║
-  ║  Admin Login:   admin / admin123                                  ║
-  ║  ⚠ CHANGE THE ADMIN PASSWORD IMMEDIATELY!                        ║
-  ║                                                                   ║
-  ║  PostgreSQL:    localhost:5432 (user: colony_user)                ║
-  ║  Redis:         localhost:6379                                    ║
-  ║  RabbitMQ UI:   http://localhost:15672 (colony / colony_rabbit)   ║
-  ║                                                                   ║
-  ║  Logs:          tail -f colony-api.log                            ║
-  ║  Restart:       node src/server.js (or pm2 restart colony-api)    ║
-  ║  Stop:          docker compose down                               ║
-  ║                                                                   ║
-  ╚═══════════════════════════════════════════════════════════════════╝
-DONE
+echo "  ╔═══════════════════════════════════════════════════════════╗"
+echo "  ║              COLONY BACKEND — SERVICES                    ║"
+echo "  ╠═══════════════════════════════════════════════════════════╣"
+echo "  ║                                                           ║"
+echo "  ║  API Server (your app talks to this):                     ║"
+echo "  ║    http://localhost:5000                                  ║"
+[ -n "$PUBLIC_IP" ] && echo -e "  ║    ${CYAN}http://${PUBLIC_IP}:5000${GREEN}  (public)                  ║"
+[ -n "$LOCAL_IP" ] && echo -e "  ║    ${CYAN}http://${LOCAL_IP}:5000${GREEN}  (local network)           ║"
+echo "  ║    Health: http://localhost:5000/health                   ║"
+echo "  ║                                                           ║"
+echo "  ║  Admin Panel (run separately):                            ║"
+echo "  ║    cd admin && npm install && npm run dev                 ║"
+echo "  ║    http://localhost:3000                                  ║"
+echo "  ║    Login: admin / admin123                                ║"
+echo "  ║                                                           ║"
+echo "  ║  Database (NOT websites — use database clients):          ║"
+echo "  ║    PostgreSQL: localhost:5432 (colony_user / see .env)    ║"
+echo "  ║    Redis:      localhost:6379 (password in .env)          ║"
+echo "  ║    RabbitMQ:   localhost:5672 (UI: localhost:15672)       ║"
+echo "  ║                                                           ║"
+echo "  ║  Flutter App:                                             ║"
+echo "  ║    Set API URL to: http://YOUR_IP:5000/v1                 ║"
+echo "  ║                                                           ║"
+echo "  ╚═══════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
-# Quick test
-info "Testing API..."
-HEALTH=$(curl -sf http://localhost:5000/health 2>/dev/null || echo "failed")
-if echo "$HEALTH" | grep -q '"status":"ok"'; then
-  log "API health check: OK"
-  echo -e "${CYAN}  Response: ${HEALTH}${NC}"
+if [ "$API_OK" = true ]; then
+  log "Everything is running. API health: OK"
+  info "Test: curl http://localhost:5000/health"
 else
-  warn "API health check returned: $HEALTH"
-  warn "Check: tail -f colony-api.log"
+  error "API is NOT running. Fix the error above, then run: node src/server.js"
 fi
