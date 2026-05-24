@@ -1,0 +1,7 @@
+node_modules/
+.env
+*.log
+.env.backup.*
+colony-api.pid
+admin-panel.pid
+tunnel.pid
