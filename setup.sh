@@ -213,7 +213,10 @@ header "Installing Admin Panel Dependencies"
 
 cd "$COLONY_DIR/admin"
 if [ -f "package.json" ]; then
-  npm install 2>&1 | tee -a "$LOG_FILE"
+  npm install --legacy-peer-deps 2>&1 | tee -a "$LOG_FILE" || {
+    warn "Admin panel npm install failed — trying with --force..."
+    npm install --force 2>&1 | tee -a "$LOG_FILE" || warn "Admin panel install failed"
+  }
   log "Admin panel dependencies installed"
 else
   warn "admin/package.json not found — skipping admin panel"
