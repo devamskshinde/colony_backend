@@ -295,6 +295,14 @@ if [ "$SEED_OK" = false ]; then
 fi
 
 # ═══════════════════════════════════════════════════════════════
+# Seed Remote Config
+# ═══════════════════════════════════════════════════════════════
+header "Seeding Remote Config"
+
+cd "$COLONY_DIR"
+DB_PASSWORD="${DB_PASSWORD}" node src/scripts/seed-config.js 2>&1 | tee -a "$LOG_FILE" || warn "Config seed had issues"
+
+# ═══════════════════════════════════════════════════════════════
 # Start API Server
 # ═══════════════════════════════════════════════════════════════
 header "Starting Colony API"

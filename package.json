@@ -7,7 +7,8 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "migrate": "node src/scripts/migrate.js",
-    "seed": "node src/scripts/seed.js"
+    "seed": "node src/scripts/seed.js",
+    "seed:config": "node src/scripts/seed-config.js"
   },
   "dependencies": {
     "express": "^4.21.2",
