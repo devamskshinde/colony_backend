@@ -357,55 +357,12 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════
-# Cloudflare Tunnel (optional)
+# Cloudflare Tunnel — runs separately via ./tunnel.sh
 # ═══════════════════════════════════════════════════════════════
-header "Cloudflare Tunnel (Public URL)"
-
-TUNNEL_URL=""
-USE_TUNNEL=false
-
-if ! check_command cloudflared; then
-  echo ""
-  echo -e "${YELLOW}Cloudflare Tunnel gives you a public HTTPS URL (like https://abc-xyz.trycloudflare.com)"
-  echo -e "so your Flutter app can reach the backend from anywhere.${NC}"
-  echo ""
-  read -p "Install Cloudflare Tunnel? (y/N): " INSTALL_TUNNEL
-  if [ "$INSTALL_TUNNEL" = "y" ] || [ "$INSTALL_TUNNEL" = "Y" ]; then
-    info "Installing cloudflared..."
-    curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /tmp/cloudflared 2>&1 | tee -a "$LOG_FILE"
-    sudo install -m 755 /tmp/cloudflared /usr/local/bin/cloudflared
-    rm -f /tmp/cloudflared
-    log "cloudflared installed"
-  fi
-fi
-
-if check_command cloudflared; then
-  echo ""
-  read -p "Start Cloudflare Tunnel for API (port ${API_PORT})? (Y/n): " START_TUNNEL
-  if [ "$START_TUNNEL" != "n" ] && [ "$START_TUNNEL" != "N" ]; then
-    USE_TUNNEL=true
-    info "Starting Cloudflare Tunnel..."
-    nohup cloudflared tunnel --url http://localhost:${API_PORT} > ../tunnel.log 2>&1 &
-    TUNNEL_PID=$!
-    echo "$TUNNEL_PID" > ../tunnel.pid
-    log "Tunnel started (PID: $TUNNEL_PID)"
-
-    info "Waiting for tunnel URL..."
-    for i in $(seq 1 30); do
-      TUNNEL_URL=$(grep -oP 'https://[a-z0-9-]+\.trycloudflare\.com' ../tunnel.log 2>/dev/null | head -1 || echo "")
-      if [ -n "$TUNNEL_URL" ]; then
-        log "Tunnel URL: ${TUNNEL_URL}"
-        break
-      fi
-      sleep 2
-    done
-
-    if [ -z "$TUNNEL_URL" ]; then
-      warn "Could not get tunnel URL. Check: tail -f tunnel.log"
-      USE_TUNNEL=false
-    fi
-  fi
-fi
+# Tunnel is now a separate script so restarting the backend
+# does NOT change your tunnel URL. Run in a separate terminal:
+#   ./tunnel.sh
+# The URL stays stable until YOU stop the tunnel.
 
 # ═══════════════════════════════════════════════════════════════
 # Get IPs
@@ -416,12 +373,6 @@ LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")
 # ═══════════════════════════════════════════════════════════════
 # Save tunnel URL to .env
 # ═══════════════════════════════════════════════════════════════
-if [ -n "$TUNNEL_URL" ]; then
-  echo "" >> "$ENV_FILE"
-  echo "# Cloudflare Tunnel URL — use this in Flutter app" >> "$ENV_FILE"
-  echo "API_PUBLIC_URL=${TUNNEL_URL}" >> "$ENV_FILE"
-fi
-
 # ═══════════════════════════════════════════════════════════════
 # Summary
 # ═══════════════════════════════════════════════════════════════
@@ -435,11 +386,6 @@ echo "  ║                                                                   �
 echo "  ║  API Server:                                                     ║"
 echo "  ║    http://localhost:${API_PORT}                                        ║"
 
-if [ -n "$TUNNEL_URL" ]; then
-  echo -e "  ║    ${CYAN}${TUNNEL_URL}${GREEN}                    ║"
-  echo "  ║    ↑ USE THIS URL IN YOUR FLUTTER APP                            ║"
-fi
-
 if [ -n "$LOCAL_IP" ]; then
   echo -e "  ║    ${CYAN}http://${LOCAL_IP}:${API_PORT}${GREEN}  (local network)                      ║"
 fi
@@ -449,26 +395,17 @@ echo "  ║  Admin Panel:                                                    ║
 echo "  ║    http://localhost:${ADMIN_PORT}                                        ║"
 echo "  ║    Login: admin / admin123                                       ║"
 echo "  ║                                                                   ║"
-echo "  ║  Database Management (pgAdmin):                                  ║"
-echo "  ║    http://localhost:${PGADMIN_PORT}                                        ║"
-echo "  ║    Login: admin@colony.app / admin123                            ║"
-echo "  ║    Add server → Host: colony-postgres, Port: 5432                ║"
-echo "  ║                  User: colony_user, DB: colony                   ║"
-echo "  ║    Password is in .env (DB_PASSWORD)                             ║"
-echo "  ║                                                                   ║"
 echo "  ║  Other Services:                                                 ║"
 echo "  ║    PostgreSQL: localhost:5432                                    ║"
 echo "  ║    Redis:      localhost:6379                                    ║"
 echo "  ║    RabbitMQ:   localhost:5672 (UI: localhost:15672)              ║"
 echo "  ║                                                                   ║"
+echo "  ║  Cloudflare Tunnel (run separately):                             ║"
+echo "  ║    ./tunnel.sh                                                   ║"
+echo "  ║    URL stays stable until YOU stop it                            ║"
+echo "  ║                                                                   ║"
 echo "  ║  Flutter App:                                                    ║"
-
-if [ -n "$TUNNEL_URL" ]; then
-  echo -e "  ║    Set API URL to: ${CYAN}${TUNNEL_URL}/v1${GREEN}              ║"
-else
-  echo "  ║    Set API URL to: http://YOUR_IP:${API_PORT}/v1                     ║"
-fi
-
+echo "  ║    Set API URL to the tunnel URL /v1                             ║"
 echo "  ║                                                                   ║"
 echo "  ╚═══════════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
@@ -480,10 +417,8 @@ if [ "$API_OK" = true ]; then
   echo ""
 fi
 
-if [ -n "$TUNNEL_URL" ]; then
-  info "Flutter API URL: ${TUNNEL_URL}/v1"
-  info "Update colony_app/lib/core/config/app_config.dart with this URL"
-fi
+info "To get a public URL, run: ./tunnel.sh"
+info "Restart backend anytime — tunnel URL won't change"
 
 info "Admin panel: http://localhost:${ADMIN_PORT}"
 info "pgAdmin:     http://localhost:${PGADMIN_PORT}"
