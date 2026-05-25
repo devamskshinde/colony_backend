@@ -106,7 +106,7 @@ export default function InfrastructurePage() {
           title="PostgreSQL Database"
           fields={[
             { label: "Host", value: "localhost", masked: false },
-            { label: "Port", value: "6432", masked: false },
+            { label: "Port", value: "5432", masked: false },
             { label: "Database", value: "colony", masked: false },
             { label: "Username", value: "colony_user", masked: false },
             { label: "Password", value: "••••••••••••", masked: true },

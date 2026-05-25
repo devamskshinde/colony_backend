@@ -404,10 +404,10 @@ export const api = {
     return request<AppConfig>("/admin/config");
   },
 
-  async updateConfig(config: Partial<AppConfig>) {
-    return request<AppConfig>("/admin/config", {
-      method: "PATCH",
-      body: JSON.stringify(config),
+  async updateConfig(updates: Record<string, unknown>) {
+    return request<AppConfig>("/admin/config/push", {
+      method: "POST",
+      body: JSON.stringify({ changes: updates }),
     });
   },
 

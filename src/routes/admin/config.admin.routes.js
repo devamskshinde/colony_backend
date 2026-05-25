@@ -6,6 +6,7 @@ const response = require('../../utils/response.utils');
 const logger = require('../../utils/logger');
 const { adminAuthenticate } = require('../../middleware/adminAuth.middleware');
 const configService = require('../../services/config.service');
+const { pool: db } = require('../../config/database');
 
 const router = Router();
 
@@ -64,7 +65,7 @@ router.get('/', async (req, res, next) => {
   try {
     const configs = await configService.getAllConfigs();
 
-    return response.success(res, { configs });
+    return response.success(res, configs);
   } catch (err) {
     logger.error('admin:getAllConfigs failed', { error: err.message });
     return next(err);
@@ -157,6 +158,73 @@ router.get('/logs', async (req, res, next) => {
     });
   } catch (err) {
     logger.error('admin:getConfigLogs failed', { error: err.message });
+    return next(err);
+  }
+});
+
+// ─── GET /admin/config/categories ──────────────────────────
+router.get('/categories', async (req, res, next) => {
+  try {
+    const result = await db.query(
+      `SELECT category, COUNT(*)::int AS item_count
+       FROM remote_config GROUP BY category ORDER BY category`
+    );
+    const cats = result.rows.map((r) => ({
+      id: r.category,
+      name: r.category.charAt(0).toUpperCase() + r.category.slice(1),
+      description: '',
+      icon: '',
+      itemCount: r.item_count,
+    }));
+    return response.success(res, cats);
+  } catch (err) {
+    logger.error('admin:getConfigCategories failed', { error: err.message });
+    return next(err);
+  }
+});
+
+// ─── GET /admin/config/category/:category ──────────────────
+router.get('/category/:category', async (req, res, next) => {
+  try {
+    const result = await db.query(
+      `SELECT key, value, value_type, category, tier_values, label, description,
+              min_value, max_value, last_modified_at, last_modified_by, version
+       FROM remote_config WHERE category = $1 ORDER BY key`,
+      [req.params.category]
+    );
+    return response.success(res, result.rows);
+  } catch (err) {
+    logger.error('admin:getConfigByCategory failed', { error: err.message });
+    return next(err);
+  }
+});
+
+// ─── POST /admin/config/push ───────────────────────────────
+router.post('/push', async (req, res, next) => {
+  try {
+    const { changes, reason } = req.body;
+    if (!changes || typeof changes !== 'object') {
+      return response.badRequest(res, 'Missing "changes" object');
+    }
+
+    const updated = [];
+    for (const [key, change] of Object.entries(changes)) {
+      const { value } = change;
+      try {
+        await db.query(
+          `UPDATE remote_config SET value = $1, last_modified_by = $2, last_modified_at = NOW(), version = version + 1
+           WHERE key = $3`,
+          [typeof value === 'object' ? JSON.stringify(value) : String(value), req.admin.id, key]
+        );
+        updated.push(key);
+      } catch (e) {
+        logger.warn('config push: failed to update key', { key, error: e.message });
+      }
+    }
+
+    return response.success(res, { updated }, `Pushed ${updated.length} config changes`);
+  } catch (err) {
+    logger.error('admin:pushConfig failed', { error: err.message });
     return next(err);
   }
 });
