@@ -168,12 +168,12 @@ function generateSignature(timestamp: string, method: string, path: string): str
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem("admin_token");
+  return localStorage.getItem("colony_admin_token");
 }
 
 function handleAuthError(): void {
   if (typeof window === "undefined") return;
-  localStorage.removeItem("admin_token");
+  localStorage.removeItem("colony_admin_token");
   localStorage.removeItem("admin_user");
   window.location.href = "/login";
 }

@@ -39,7 +39,7 @@ interface AuthState {
 // Constants
 // ---------------------------------------------------------------------------
 
-const TOKEN_KEY = "admin_token";
+const TOKEN_KEY = "colony_admin_token";
 const USER_KEY = "admin_user";
 const TOKEN_EXPIRY_KEY = "admin_token_expiry";
 

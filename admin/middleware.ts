@@ -3,20 +3,21 @@ import type { NextRequest } from "next/server";
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const token = request.cookies.get("colony_admin_token")?.value;
+
+  // Redirect root to dashboard
+  if (pathname === "/") {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
+  }
 
   // Public routes that don't need auth
-  if (pathname === "/login" || pathname === "/") {
+  if (pathname === "/login") {
     return NextResponse.next();
   }
 
-  // If no token, redirect to login
-  if (!token) {
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("from", pathname);
-    return NextResponse.redirect(loginUrl);
-  }
-
+  // For dashboard routes, let the client-side auth check in
+  // DashboardLayout handle redirects. Server middleware cannot
+  // read localStorage tokens, so we let all dashboard routes
+  // through and redirect client-side if needed.
   return NextResponse.next();
 }
 
