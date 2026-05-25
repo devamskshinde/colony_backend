@@ -223,34 +223,49 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════
-# Seed admin user
+# Seed admin user (with retries)
 # ═══════════════════════════════════════════════════════════════
 header "Seeding Admin User"
 
 cd "$COLONY_DIR"
-node -e "
-const bcrypt = require('bcryptjs');
-const { Pool } = require('pg');
-async function seed() {
-  const pool = new Pool({
-    host: 'localhost', port: 5432, database: 'colony',
-    user: 'colony_user', password: '${DB_PASSWORD}',
-    connectionTimeoutMillis: 10000,
-  });
-  try {
-    await pool.query('SELECT 1');
-    const hash = await bcrypt.hash('admin123', 12);
-    await pool.query(
-      'INSERT INTO admin_users (username, password_hash, email, role, permissions) VALUES (\$1, \$2, \$3, \$4, \$5) ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash',
-      ['admin', hash, 'admin@colony.app', 'super_admin', JSON.stringify({'*': true})]
-    );
-    console.log('Admin seeded: admin / admin123');
-  } catch (e) {
-    console.error('Admin seed:', e.message);
-  } finally { await pool.end(); }
-}
-seed();
-" 2>&1 | tee -a "$LOG_FILE"
+SEED_OK=false
+for i in $(seq 1 10); do
+  RESULT=$(node -e "
+  const bcrypt = require('bcryptjs');
+  const { Pool } = require('pg');
+  async function seed() {
+    const pool = new Pool({
+      host: 'localhost', port: 5432, database: 'colony',
+      user: 'colony_user', password: '${DB_PASSWORD}',
+      connectionTimeoutMillis: 15000,
+    });
+    try {
+      await pool.query('SELECT 1');
+      const hash = await bcrypt.hash('admin123', 12);
+      await pool.query(
+        'INSERT INTO admin_users (username, password_hash, email, role, permissions) VALUES (\$1, \$2, \$3, \$4, \$5) ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash',
+        ['admin', hash, 'admin@colony.app', 'super_admin', JSON.stringify({'*': true})]
+      );
+      console.log('OK');
+    } catch (e) {
+      console.log('FAIL:' + e.message);
+    } finally { await pool.end(); }
+  }
+  seed();
+  " 2>&1)
+
+  if echo "$RESULT" | grep -q "^OK$"; then
+    log "Admin seeded: admin / admin123"
+    SEED_OK=true
+    break
+  fi
+  warn "Admin seed attempt $i/10 failed: $(echo "$RESULT" | grep 'FAIL:' | sed 's/FAIL://')"
+  sleep 3
+done
+
+if [ "$SEED_OK" = false ]; then
+  error "Admin seed FAILED after 10 attempts — reseed manually with: npm run seed"
+fi
 
 # ═══════════════════════════════════════════════════════════════
 # Start API Server
