@@ -5,7 +5,12 @@
  * and automatic 401 redirects for the admin panel.
  */
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:5000/api/v1";
+// Use RELATIVE URLs so all API calls go through Next.js's server-side proxy
+// (/api/* -> http://127.0.0.1:5000/api/* on WSL).
+// Never use absolute URLs (e.g. http://127.0.0.1:5000) from the browser, because
+// on WSL the browser runs on Windows and 127.0.0.1 points to Windows localhost,
+// NOT the WSL VM where the API actually lives.
+const BASE_URL = "/api/v1";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -336,11 +341,10 @@ export const api = {
    */
   async pingBackend(): Promise<boolean> {
     try {
-      // Health endpoint is at root, not under /api/v1
-      const healthUrl = BASE_URL.replace(/\/api\/v1$/, "/health");
+      // Go through the Next.js proxy: /api/health -> http://127.0.0.1:5000/health (on WSL)
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 3000);
-      const res = await fetch(healthUrl, {
+      const res = await fetch("/api/health", {
         signal: controller.signal,
       });
       clearTimeout(timeout);
