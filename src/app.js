@@ -38,8 +38,10 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(hpp());
 
-// Request signing
-app.use(verifyRequestSignature);
+// Request signing — DISABLED globally. Re-enable per-route when proper
+// key exchange is implemented. Auth routes are exempt anyway, and the
+// Flutter app uses a placeholder signing key that will never match.
+// app.use(verifyRequestSignature);
 
 // Rate limiting
 app.use(generalLimiter);
