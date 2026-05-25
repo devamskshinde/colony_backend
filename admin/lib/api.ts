@@ -212,17 +212,42 @@ async function request<T>(
     // Handle 401 Unauthorized
     if (response.status === 401) {
       handleAuthError();
-      throw new ApiError("Session expired. Please log in again.", 401);
+      throw new ApiError(
+        "Session expired. Please log in again.",
+        401,
+        undefined,
+        "UNAUTHORIZED"
+      );
     }
 
     // Handle 403 Forbidden
     if (response.status === 403) {
-      throw new ApiError("You do not have permission to perform this action.", 403);
+      throw new ApiError(
+        "You do not have permission to perform this action.",
+        403,
+        undefined,
+        "FORBIDDEN"
+      );
     }
 
     // Handle 429 Rate Limit
     if (response.status === 429) {
-      throw new ApiError("Too many requests. Please try again later.", 429);
+      throw new ApiError(
+        "Too many requests. Please try again later.",
+        429,
+        undefined,
+        "RATE_LIMITED"
+      );
+    }
+
+    // Handle 5xx server errors
+    if (response.status >= 500) {
+      throw new ApiError(
+        `Backend server error (${response.status}). Check the backend logs.`,
+        response.status,
+        undefined,
+        "SERVER_ERROR"
+      );
     }
 
     // Handle other errors
@@ -242,14 +267,21 @@ async function request<T>(
       throw error;
     }
 
-    // Network errors
+    // Network errors — server unreachable
     if (error instanceof TypeError && error.message === "Failed to fetch") {
-      throw new ApiError("Unable to connect to the server. Please check your connection.", 0);
+      throw new ApiError(
+        `Unable to connect to the backend at ${BASE_URL}. Make sure the server is running and Docker services are up.`,
+        0,
+        undefined,
+        "NETWORK_ERROR"
+      );
     }
 
     throw new ApiError(
       error instanceof Error ? error.message : "An unexpected error occurred.",
-      0
+      0,
+      undefined,
+      "NETWORK_ERROR"
     );
   }
 }
@@ -261,12 +293,32 @@ async function request<T>(
 export class ApiError extends Error {
   status: number;
   body?: unknown;
+  /** Machine-readable error code for programmatic handling. */
+  code: "NETWORK_ERROR" | "UNAUTHORIZED" | "FORBIDDEN" | "RATE_LIMITED" | "SERVER_ERROR" | "UNKNOWN";
 
-  constructor(message: string, status: number, body?: unknown) {
+  constructor(message: string, status: number, body?: unknown, code?: ApiError["code"]) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.body = body;
+    this.code = code || (
+      status === 0 ? "NETWORK_ERROR" :
+      status === 401 ? "UNAUTHORIZED" :
+      status === 403 ? "FORBIDDEN" :
+      status === 429 ? "RATE_LIMITED" :
+      status >= 500 ? "SERVER_ERROR" :
+      "UNKNOWN"
+    );
+  }
+
+  /** Check if this is a network/connection error (server unreachable). */
+  isNetworkError(): boolean {
+    return this.code === "NETWORK_ERROR";
+  }
+
+  /** Check if this is an auth error (token expired or missing). */
+  isAuthError(): boolean {
+    return this.code === "UNAUTHORIZED";
   }
 }
 
@@ -275,6 +327,29 @@ export class ApiError extends Error {
 // ---------------------------------------------------------------------------
 
 export const api = {
+  // ── Health / Connectivity ────────────────────────
+
+  /**
+   * Quick check if the backend is reachable.
+   * Returns true if the server responds, false if unreachable.
+   * Does NOT throw — always resolves to boolean.
+   */
+  async pingBackend(): Promise<boolean> {
+    try {
+      // Health endpoint is at root, not under /api/v1
+      const healthUrl = BASE_URL.replace(/\/api\/v1$/, "/health");
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      const res = await fetch(healthUrl, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      return res.ok;
+    } catch {
+      return false;
+    }
+  },
+
   // Auth
   async login(username: string, password: string, totp?: string) {
     return request<LoginResponse>("/admin/auth/login", {

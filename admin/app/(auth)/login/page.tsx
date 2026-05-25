@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Shield, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Shield, Eye, EyeOff, Loader2, WifiOff, Wifi } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { useAuthStore } from "@/lib/auth-store";
 
@@ -18,8 +18,24 @@ export default function LoginPage() {
   const [requires2FA, setRequires2FA] = useState(false);
   const [attempts, setAttempts] = useState(0);
   const [lockoutUntil, setLockoutUntil] = useState<number | null>(null);
+  const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
+  const [checkingBackend, setCheckingBackend] = useState(true);
 
   const isLockedOut = lockoutUntil !== null && Date.now() < lockoutUntil;
+
+  useEffect(() => {
+    let cancelled = false;
+    async function check() {
+      setCheckingBackend(true);
+      const ok = await api.pingBackend();
+      if (!cancelled) {
+        setBackendOnline(ok);
+        setCheckingBackend(false);
+      }
+    }
+    check();
+    return () => { cancelled = true; };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,7 +74,11 @@ export default function LoginPage() {
       }
 
       if (error instanceof ApiError) {
-        if (error.status === 403 && error.body && (error.body as Record<string, unknown>).requiresTwoFactor) {
+        if (error.isNetworkError()) {
+          // Backend is unreachable — show detailed help
+          setBackendOnline(false);
+          toast.error("Cannot reach the backend server. Check that Docker services and the API are running.");
+        } else if (error.status === 403 && error.body && (error.body as Record<string, unknown>).requiresTwoFactor) {
           setRequires2FA(true);
           toast.info("Enter your 2FA code");
         } else {
@@ -83,6 +103,32 @@ export default function LoginPage() {
           <h1 className="text-2xl font-bold text-textPrimary">Colony Admin</h1>
           <p className="text-textMuted mt-1">God Mode Control Center</p>
         </div>
+
+        {/* Backend status indicator */}
+        {!checkingBackend && (
+          <div className={`mb-6 rounded-xl border px-4 py-3 flex items-center justify-center gap-2 text-sm ${
+            backendOnline
+              ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+              : "bg-amber-500/10 border-amber-500/20 text-amber-400"
+          }`}>
+            {backendOnline ? (
+              <><Wifi className="w-4 h-4" /> Backend connected</>
+            ) : (
+              <div className="flex flex-col items-center gap-1">
+                <div className="flex items-center gap-2">
+                  <WifiOff className="w-4 h-4" />
+                  <span>Backend not reachable</span>
+                </div>
+                <p className="text-[11px] text-amber-400/60 mt-1 text-center">
+                  Make sure Docker services are running on WSL and the API server is started on port 5000.
+                </p>
+                <pre className="text-[11px] text-amber-400/50 mt-1 bg-black/20 px-2 py-1 rounded">
+cd colony_backend && docker compose up -d && node src/server.js
+                </pre>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Login Form */}
         <div className="bg-bgTertiary border border-white/8 rounded-2xl p-8">
