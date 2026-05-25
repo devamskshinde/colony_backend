@@ -241,10 +241,165 @@ async function logout(req, res, next) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Email/Password Auth
+// ---------------------------------------------------------------------------
+
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const { query } = require('../config/database');
+const env = require('../config/environment');
+
+const registerEmailSchema = Joi.object({
+  email: Joi.string().email().required(),
+  password: Joi.string().min(8).max(128).required(),
+  displayName: Joi.string().trim().min(2).max(50).required(),
+});
+
+const loginEmailSchema = Joi.object({
+  email: Joi.string().email().required(),
+  password: Joi.string().min(1).required(),
+});
+
+/**
+ * POST /auth/register-email
+ * Register a new user with email + password.
+ */
+async function registerEmail(req, res, next) {
+  try {
+    const { error, value } = registerEmailSchema.validate(req.body, { abortEarly: false });
+    if (error) {
+      return response.badRequest(res, 'Validation failed', error.details.map((d) => d.message));
+    }
+
+    const { email, password, displayName } = value;
+
+    // Check if email already exists
+    const existing = await query('SELECT id FROM users WHERE email = $1', [email]);
+    if (existing.rows.length > 0) {
+      return response.conflict(res, 'Email already registered');
+    }
+
+    // Hash password
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    // Generate a placeholder phone (email users don't have phones initially)
+    const placeholderPhone = `email_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+    // Create user
+    const result = await query(
+      `INSERT INTO users (phone, phone_verified, email, email_verified, display_name, username, password_hash)
+       VALUES ($1, false, $2, false, $3, $4, $5)
+       RETURNING id, display_name, username, email`,
+      [placeholderPhone, email, displayName, email.split('@')[0].replace(/[^a-z0-9_.]/g, '_'), passwordHash]
+    );
+
+    const user = result.rows[0];
+
+    // Generate tokens
+    const jti = require('crypto').randomUUID();
+    const accessToken = jwt.sign(
+      { id: user.id, email: user.email, type: 'user' },
+      env.JWT_SECRET,
+      { expiresIn: env.JWT_EXPIRY }
+    );
+    const refreshToken = jwt.sign(
+      { id: user.id, jti, type: 'refresh' },
+      env.JWT_SECRET,
+      { expiresIn: env.REFRESH_TOKEN_EXPIRY }
+    );
+
+    logger.info('Email registration successful', { userId: user.id, email });
+
+    return response.created(res, {
+      user: { id: user.id, displayName: user.display_name, username: user.username, email: user.email },
+      accessToken,
+      refreshToken,
+    }, 'Registration successful');
+  } catch (err) {
+    logger.error('registerEmail failed', { error: err.message });
+    return next(err);
+  }
+}
+
+/**
+ * POST /auth/login-email
+ * Login with email + password.
+ */
+async function loginEmail(req, res, next) {
+  try {
+    const { error, value } = loginEmailSchema.validate(req.body, { abortEarly: false });
+    if (error) {
+      return response.badRequest(res, 'Validation failed', error.details.map((d) => d.message));
+    }
+
+    const { email, password } = value;
+
+    // Find user by email
+    const result = await query(
+      'SELECT id, display_name, username, email, password_hash, is_active, is_deleted FROM users WHERE email = $1',
+      [email]
+    );
+
+    if (result.rows.length === 0) {
+      return response.unauthorized(res, 'Invalid email or password');
+    }
+
+    const user = result.rows[0];
+
+    if (user.is_deleted) {
+      return response.unauthorized(res, 'Account has been deleted');
+    }
+
+    if (!user.is_active) {
+      return response.unauthorized(res, 'Account is disabled');
+    }
+
+    if (!user.password_hash) {
+      return response.unauthorized(res, 'This account uses phone login. Please use OTP.');
+    }
+
+    // Verify password
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) {
+      return response.unauthorized(res, 'Invalid email or password');
+    }
+
+    // Generate tokens
+    const jti = require('crypto').randomUUID();
+    const accessToken = jwt.sign(
+      { id: user.id, email: user.email, type: 'user' },
+      env.JWT_SECRET,
+      { expiresIn: env.JWT_EXPIRY }
+    );
+    const refreshToken = jwt.sign(
+      { id: user.id, jti, type: 'refresh' },
+      env.JWT_SECRET,
+      { expiresIn: env.REFRESH_TOKEN_EXPIRY }
+    );
+
+    // Update last active
+    await query('UPDATE users SET last_active_at = NOW() WHERE id = $1', [user.id]);
+
+    logger.info('Email login successful', { userId: user.id, email });
+
+    return response.success(res, {
+      user: { id: user.id, displayName: user.display_name, username: user.username, email: user.email },
+      accessToken,
+      refreshToken,
+    }, 'Login successful');
+  } catch (err) {
+    logger.error('loginEmail failed', { error: err.message });
+    return next(err);
+  }
+}
+
 module.exports = {
   sendOtp,
   verifyOtp,
   register,
   refreshToken,
   logout,
+  registerEmail,
+  loginEmail,
 };
