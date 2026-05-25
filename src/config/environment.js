@@ -8,7 +8,7 @@ const envSchema = Joi.object({
   HOST: Joi.string().default('0.0.0.0'),
 
   DB_HOST: Joi.string().default('localhost'),
-  DB_PORT: Joi.number().default(6432),
+  DB_PORT: Joi.number().default(5432),
   DB_NAME: Joi.string().default('colony'),
   DB_USER: Joi.string().default('colony_user'),
   DB_PASSWORD: Joi.string().required(),
@@ -26,7 +26,7 @@ const envSchema = Joi.object({
   REQUEST_SIGNING_SECRET: Joi.string().min(32).required(),
   DEVICE_SECRET: Joi.string().min(32).required(),
 
-  RABBITMQ_URL: Joi.string().default('amqp://colony:colony@localhost:5672'),
+  RABBITMQ_URL: Joi.string().default('amqp://colony:colony_rabbit_dev@localhost:5672'),
 
   TWILIO_SID: Joi.string().allow('').default(''),
   TWILIO_AUTH_TOKEN: Joi.string().allow('').default(''),
