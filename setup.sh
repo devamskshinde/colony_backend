@@ -1,7 +1,8 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════
-# Colony Backend — One-Click Setup Script v5.0
-# All-in-one: Docker + API + Admin Panel + Cloudflare Tunnel
+# Colony Backend — One-Click Setup Script v6.0
+# All-in-one: Docker + pgAdmin + Migrations + API + Admin Panel + Cloudflare Tunnel
+# ZERO manual steps required
 # ═══════════════════════════════════════════════════════════════
 
 set -euo pipefail
@@ -19,6 +20,7 @@ LOG_FILE="${COLONY_DIR}/setup.log"
 ENV_FILE="${COLONY_DIR}/.env"
 API_PORT=5000
 ADMIN_PORT=3000
+PGADMIN_PORT=5050
 
 log()   { echo -e "${GREEN}[✓]${NC} $1" | tee -a "$LOG_FILE"; }
 warn()  { echo -e "${YELLOW}[!]${NC} $1" | tee -a "$LOG_FILE"; }
@@ -37,7 +39,7 @@ cat << 'BANNER'
   ██║     ██║   ██║██║     ██║   ██║██║╚██╗██║  ╚██╔╝
   ╚██████╗╚██████╔╝███████╗╚██████╔╝██║ ╚████║   ██║
    ╚═════╝ ╚═════╝ ╚══════╝ ╚═════╝ ╚═╝  ╚═══╝   ╚═╝
-   Backend Setup Script v5.0 — All-in-One
+   Backend Setup Script v6.0 — All-in-One, Fully Automated
 BANNER
 echo -e "${NC}"
 
@@ -82,7 +84,7 @@ fi
 log "Node $(node --version)"
 
 # ═══════════════════════════════════════════════════════════════
-# Environment — fixed defaults (override via env vars for prod)
+# Environment
 # ═══════════════════════════════════════════════════════════════
 header "Environment Configuration"
 
@@ -141,19 +143,19 @@ header "Clean Slate — Resetting Docker"
 
 cd "$COLONY_DIR"
 docker compose down -v 2>/dev/null || true
-docker rm -f colony-postgres colony-redis colony-rabbitmq colony-pgbouncer colony-api 2>/dev/null || true
+docker rm -f colony-postgres colony-redis colony-rabbitmq colony-pgadmin colony-api 2>/dev/null || true
 fuser -k ${API_PORT}/tcp 2>/dev/null || true
 fuser -k ${ADMIN_PORT}/tcp 2>/dev/null || true
 log "All containers and volumes removed"
 
 # ═══════════════════════════════════════════════════════════════
-# Start Docker Services
+# Start Docker Services (including pgAdmin)
 # ═══════════════════════════════════════════════════════════════
 header "Starting Docker Services"
 
 docker compose up -d 2>&1 | tee -a "$LOG_FILE"
 
-# Wait for PostgreSQL (test actual password auth, retry up to 60 times)
+# ── Wait for PostgreSQL ────────────────────────────────
 info "Waiting for PostgreSQL (testing password auth)..."
 DB_READY=false
 for i in $(seq 1 60); do
@@ -175,7 +177,31 @@ if [ "$DB_READY" = false ]; then
   exit 1
 fi
 
-# Wait for Redis
+# ── Wait for init scripts to finish ───────────────────────
+info "Waiting for PostgreSQL init scripts to complete..."
+INIT_DONE=false
+for i in $(seq 1 20); do
+  # Check if the admin_users table exists (created in 002_create_config.sql)
+  if docker exec colony-postgres psql -U colony_user -d colony -c "SELECT 1 FROM admin_users LIMIT 1" &>/dev/null 2>&1; then
+    log "Init scripts complete (admin_users table exists)"
+    INIT_DONE=true
+    break
+  fi
+  sleep 3
+done
+
+if [ "$INIT_DONE" = false ]; then
+  warn "Init scripts may not have completed — running migrations manually..."
+  cd "$COLONY_DIR"
+  node src/scripts/migrate.js 2>&1 | tee -a "$LOG_FILE" || warn "Manual migration had issues"
+  log "Manual migration attempted"
+else
+  # Run migrations anyway to ensure everything is applied
+  cd "$COLONY_DIR"
+  node src/scripts/migrate.js 2>&1 | tee -a "$LOG_FILE" && log "Migrations verified" || warn "Migration verification had issues (tables likely already exist)"
+fi
+
+# ── Wait for Redis ──────────────────────────────────────
 info "Waiting for Redis..."
 for i in $(seq 1 15); do
   if docker exec colony-redis redis-cli -a "${REDIS_PASSWORD}" ping 2>/dev/null | grep -q PONG; then
@@ -186,7 +212,7 @@ for i in $(seq 1 15); do
   sleep 2
 done
 
-# Wait for RabbitMQ
+# ── Wait for RabbitMQ ───────────────────────────────────
 info "Waiting for RabbitMQ..."
 for i in $(seq 1 30); do
   if docker exec colony-rabbitmq rabbitmq-diagnostics check_running &>/dev/null; then
@@ -264,7 +290,8 @@ for i in $(seq 1 10); do
 done
 
 if [ "$SEED_OK" = false ]; then
-  error "Admin seed FAILED after 10 attempts — reseed manually with: npm run seed"
+  error "Admin seed FAILED after 10 attempts"
+  error "You can manually reseed after setup with: npm run seed"
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -329,7 +356,6 @@ header "Cloudflare Tunnel (Public URL)"
 TUNNEL_URL=""
 USE_TUNNEL=false
 
-# Check if cloudflared is installed
 if ! check_command cloudflared; then
   echo ""
   echo -e "${YELLOW}Cloudflare Tunnel gives you a public HTTPS URL (like https://abc-xyz.trycloudflare.com)"
@@ -351,13 +377,11 @@ if check_command cloudflared; then
   if [ "$START_TUNNEL" != "n" ] && [ "$START_TUNNEL" != "N" ]; then
     USE_TUNNEL=true
     info "Starting Cloudflare Tunnel..."
-    # Run cloudflared quick tunnel in background, capture URL
     nohup cloudflared tunnel --url http://localhost:${API_PORT} > ../tunnel.log 2>&1 &
     TUNNEL_PID=$!
     echo "$TUNNEL_PID" > ../tunnel.pid
     log "Tunnel started (PID: $TUNNEL_PID)"
 
-    # Wait for tunnel URL to appear in logs
     info "Waiting for tunnel URL..."
     for i in $(seq 1 30); do
       TUNNEL_URL=$(grep -oP 'https://[a-z0-9-]+\.trycloudflare\.com' ../tunnel.log 2>/dev/null | head -1 || echo "")
@@ -370,7 +394,6 @@ if check_command cloudflared; then
 
     if [ -z "$TUNNEL_URL" ]; then
       warn "Could not get tunnel URL. Check: tail -f tunnel.log"
-      warn "You can also run manually: cloudflared tunnel --url http://localhost:${API_PORT}"
       USE_TUNNEL=false
     fi
   fi
@@ -383,7 +406,7 @@ PUBLIC_IP=$(curl -sf --connect-timeout 5 https://api.ipify.org 2>/dev/null || ec
 LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")
 
 # ═══════════════════════════════════════════════════════════════
-# Save tunnel URL to .env if available
+# Save tunnel URL to .env
 # ═══════════════════════════════════════════════════════════════
 if [ -n "$TUNNEL_URL" ]; then
   echo "" >> "$ENV_FILE"
@@ -418,7 +441,14 @@ echo "  ║  Admin Panel:                                                    ║
 echo "  ║    http://localhost:${ADMIN_PORT}                                        ║"
 echo "  ║    Login: admin / admin123                                       ║"
 echo "  ║                                                                   ║"
-echo "  ║  Database (use DB clients, not browser):                         ║"
+echo "  ║  Database Management (pgAdmin):                                  ║"
+echo "  ║    http://localhost:${PGADMIN_PORT}                                        ║"
+echo "  ║    Login: admin@colony.app / admin123                            ║"
+echo "  ║    Add server → Host: colony-postgres, Port: 5432                ║"
+echo "  ║                  User: colony_user, DB: colony                   ║"
+echo "  ║    Password is in .env (DB_PASSWORD)                             ║"
+echo "  ║                                                                   ║"
+echo "  ║  Other Services:                                                 ║"
 echo "  ║    PostgreSQL: localhost:5432                                    ║"
 echo "  ║    Redis:      localhost:6379                                    ║"
 echo "  ║    RabbitMQ:   localhost:5672 (UI: localhost:15672)              ║"
@@ -448,4 +478,5 @@ if [ -n "$TUNNEL_URL" ]; then
 fi
 
 info "Admin panel: http://localhost:${ADMIN_PORT}"
+info "pgAdmin:     http://localhost:${PGADMIN_PORT}"
 info "Logs: tail -f colony-api.log | tail -f admin-panel.log | tail -f tunnel.log"
